@@ -153,6 +153,217 @@ npm start
 npm run dev
 ```
 
+## MCP Client with Passport (US-1.2.2)
+
+This example includes **client-side** examples showing how to attach agent passports to MCP tool calls. This is the agent that makes tool calls to MCP servers.
+
+### Key Features
+
+- ✅ **Pre-action policy verification**: Verifies policy BEFORE calling MCP tools using `verifyPolicy()`
+- ✅ **Automatic passport attachment**: Agent ID is automatically added to tool call arguments
+- ✅ **Policy denial handling**: Graceful retry with adjusted parameters or escalation
+- ✅ **Error handling**: Comprehensive error handling with audit trails
+- ✅ **Framework integration**: Examples for OpenAI, Anthropic, and custom MCP clients
+- ✅ **Published SDK**: Uses `@aporthq/sdk-node` (npm) and `aporthq-sdk-python` (PyPI)
+
+### Quick Start (TypeScript)
+
+**Install dependencies:**
+```bash
+npm install @aporthq/sdk-node @modelcontextprotocol/sdk
+```
+
+**Usage:**
+```typescript
+import { MCPClientWithPassport } from './src/client-example';
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { APortClient } from '@aporthq/sdk-node';
+
+// Initialize APort client (uses published SDK)
+const aportClient = new APortClient({
+  baseUrl: 'https://api.aport.io',
+});
+
+const transport = new StdioClientTransport({
+  command: 'npx',
+  args: ['@aporthq/mcp-policy-gate-example'],
+});
+
+const client = new MCPClientWithPassport('ap_your_agent_id', transport);
+await client.connect(transport);
+
+// Call tool - policy is verified FIRST, then tool executes
+const result = await client.callTool(
+  'merge_pull_request',
+  {
+    repository: 'my-org/my-repo',
+    pr_number: 123,
+    base_branch: 'main',
+  },
+  {
+    retryOnDenial: false,
+    maxRetries: 3,
+  }
+);
+
+console.log(result);
+// Policy verification happens automatically before tool execution
+```
+
+### Quick Start (Python)
+
+**Install dependencies:**
+```bash
+pip install aporthq-sdk-python
+```
+
+**Usage:**
+```python
+from client_example import MCPClientWithPassport
+from aporthq_sdk_python import APortClient, APortClientOptions
+
+# Initialize APort client (uses published SDK)
+aport_client = APortClient(APortClientOptions(
+    base_url='https://api.aport.io',
+))
+
+async with MCPClientWithPassport('ap_your_agent_id') as client:
+    # Call tool - policy is verified FIRST, then tool executes
+    result = await client.call_tool(
+        'merge_pull_request',
+        {
+            'repository': 'my-org/my-repo',
+            'pr_number': 123,
+            'base_branch': 'main',
+        },
+        retry_on_denial=False,
+        max_retries=3,
+    )
+    
+    print(result)
+    # Policy verification happens automatically before tool execution
+```
+
+### Policy Verification Flow
+
+The client verifies policy BEFORE each tool call:
+
+```typescript
+// Each call verifies policy first, then executes tool
+await client.callTool('merge_pull_request', {
+  repository: 'my-org/my-repo',
+  pr_number: 123,
+});
+// Flow: 1. Verify policy (code.repository.merge.v1)
+//       2. If allowed, call MCP tool with agent_id
+//       3. Return result with decision_id
+```
+
+### Policy Denial Handling
+
+The client can automatically retry with adjusted parameters:
+
+```typescript
+// Automatic retry with reduced amount
+await client.callTool(
+  'process_refund',
+  { amount: 1000000 }, // $10,000
+  {
+    retryOnDenial: true,  // Retry if denied
+    maxRetries: 3,
+  }
+);
+// If denied, automatically retries with amount: 500000, then 250000
+```
+
+### Integration Examples
+
+#### OpenAI Function Calling
+
+See [`openai-integration-example.py`](./openai-integration-example.py) for a complete example showing how to integrate MCP client with OpenAI's function calling API.
+
+```python
+from openai_integration_example import OpenAIWithMCPPassport
+
+wrapper = OpenAIWithMCPPassport('ap_your_agent_id')
+
+# OpenAI function calls are automatically routed to MCP tools with passport
+response = await wrapper.chat_completion_with_tools(
+    messages=[{"role": "user", "content": "Refund $50 to customer_123"}],
+    functions=[...],
+)
+```
+
+#### Anthropic Tool Use
+
+See [`anthropic-integration-example.py`](./anthropic-integration-example.py) for a complete example showing how to integrate MCP client with Anthropic's tool use API.
+
+```python
+from anthropic_integration_example import AnthropicWithMCPPassport
+
+wrapper = AnthropicWithMCPPassport('ap_your_agent_id')
+
+# Anthropic tool use is automatically routed to MCP tools with passport
+response = await wrapper.messages_with_tools(
+    messages=[{"role": "user", "content": "Merge PR #123"}],
+    tools=[...],
+)
+```
+
+### Running Client Examples
+
+#### TypeScript
+
+```bash
+# Run client examples
+npm run build
+node dist/client-example.js
+
+# Or with tsx
+npx tsx src/client-example.ts
+```
+
+#### Python
+
+```bash
+# Install dependencies
+pip install aporthq-sdk-python mcp
+
+# Run client examples
+python client_example.py
+
+# Run OpenAI integration example
+python openai-integration-example.py
+
+# Run Anthropic integration example
+python anthropic-integration-example.py
+```
+
+### Best Practices
+
+1. **Always attach agent_id**: The client automatically attaches `agent_id` to all tool calls
+2. **Handle policy denials**: Use `retryOnDenial` for operations that can be retried with adjusted parameters
+3. **Cache passports**: The client caches passports to reduce API calls
+4. **Log decisions**: Always log decision IDs for audit trails
+5. **Error handling**: Implement graceful degradation for network errors
+
+### Error Handling
+
+```typescript
+try {
+  const result = await client.callTool('process_refund', {...});
+} catch (error) {
+  if (error instanceof PolicyDeniedError) {
+    // Policy denied - escalate to human or retry with lower amount
+    console.error('Policy denied:', error.message);
+    console.error('Decision ID:', error.result.decision_id);
+  } else {
+    // Network or other error
+    console.error('Error:', error);
+  }
+}
+```
+
 ## Integration with Other MCP Clients
 
 ### VS Code (Cline Extension)
@@ -205,6 +416,20 @@ const result = await client.request({
 });
 
 console.log(result);
+```
+
+## File Structure
+
+```
+mcp-policy-gate-example/
+├── src/
+│   ├── index.ts              # MCP server (policy enforcement)
+│   └── client-example.ts      # MCP client (passport attachment)
+├── client_example.py          # Python MCP client
+├── openai-integration-example.py    # OpenAI integration
+├── anthropic-integration-example.py # Anthropic integration
+├── README.md                  # This file
+└── package.json
 ```
 
 ## License
